@@ -10,7 +10,7 @@ import SimpleTrainer as st
 class Config(st.Config):
     def __init__(self):
         self.device = "cuda"
-        self.checkpoint = "bert-base-uncased"
+        self.checkpoint = "hf-internal-testing/tiny-random-BertModel"
         self.wandb = "disabled"
         self.max_epochs = 2
         self.batch_size = 8
@@ -77,6 +77,7 @@ if __name__ == "__main__":
         module=SSTModule(),
         max_epochs=config.max_epochs,
         device=config.device,
+        amp=False,
     )
 
     trainer.train(

@@ -13,12 +13,12 @@ class Trainer:
             module: Module,
             max_epochs: int = 10,
             device: str = "cuda",
-            precision: int = 32
+            amp: bool = False
     ):
         self.module = module
         self.max_epochs = max_epochs
         self.device = device
-        self.precision = precision
+        self.amp = amp
 
         self.dump_config()
 
@@ -29,17 +29,26 @@ class Trainer:
     ):
         self.module.model.to(self.device)
 
-        self.module.before_train_epoch()  # <====================================================================== Hook
+        if self.amp:
+            scaler = torch.cuda.amp.GradScaler()
+
+        self.module.before_train_epoch()
         for _ in trange(self.max_epochs, desc="Train epoch"):
-            self.module.model.train()  # <========================================================================= Hook
-            self.module.before_train_batch()  # <================================================================== Hook
+            self.module.model.train()
+            self.module.before_train_batch()
             for i, batch in tqdm(enumerate(train_dataloader), desc="Train batch"):
-                loss = self.module.on_train_batch(batch, i)  # <=================================================== Hook
-                loss.backward()
-                self.module.optimizer.step()
                 self.module.optimizer.zero_grad()
+                with torch.cuda.amp.autocast(enabled=self.amp):
+                    loss = self.module.on_train_batch(batch, i)
+                if self.amp:
+                    scaler.scale(loss).backward()
+                    scaler.step(self.module.optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    self.module.optimizer.step()
             self.module.scheduler.step()
-            self.module.after_train_batch()  # <=================================================================== Hook
+            self.module.after_train_batch()
 
             self.module.model.eval()
             self._dev(
@@ -49,7 +58,7 @@ class Trainer:
                 on_batch_fn=self.module.on_valid_batch,
                 after_batch_fn=self.module.after_valid_batch,
             )
-        self.module.after_train_epoch()  # <======================================================================= Hook
+        self.module.after_train_epoch()
 
     @staticmethod
     def _dev(
@@ -59,11 +68,11 @@ class Trainer:
             on_batch_fn: Callable[[Any, int], None],
             after_batch_fn: Callable[[], None],
     ):
-        before_batch_fn()  # <===================================================================================== Hook
+        before_batch_fn()
         with torch.no_grad():
             for i, batch in tqdm(enumerate(dataloader), desc=f"{name} batch", leave=False):
-                on_batch_fn(batch, i)  # <========================================================================= Hook
-        after_batch_fn()  # <====================================================================================== Hook
+                on_batch_fn(batch, i)
+        after_batch_fn()
 
     def test(
             self,
